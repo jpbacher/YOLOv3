@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 from utils.parse_cfg import parse_config, parse_data_config
 
-def make_modules(block_defs):
+def make_module_list(block_defs):
     hyperparams = block_defs.pop(0)
     out_filters = [int(hyperparams['channels'])]
     module_list = nn.ModuleList()
@@ -30,9 +30,33 @@ def make_modules(block_defs):
             )
             if batch_norm:
                 modules.add_module(
-                    f'batch_norm__{module_m}',nn.BatchNorm2d(filters=filters, momentum=0.9, eps=1e-5))
+                    f'batch_norm__{module_m}',nn.BatchNorm2d(num_features=filters, momentum=0.9, eps=1e-5))
             if module_def['activation'] == 'leaky':
                 modules.add_module(f'leaky_relu_{module_m}', nn.LeakyReLU(negative_slope=0.1))
 
-        elif module_def['type']
+        elif module_def["type"] == 'upsample':
+            upsample = Upsample(scale_factor=int(module_def['stride']), mode='nearest')
+            modules.add_module(f'upsample_{module_m}', upsample)
 
+        elif module_def["type"] == "route":
+            layers = [int(l) for l in module_def['layers'].split(',')]
+            filters = sum([out_filters[1:][l] for l in layers])
+            modules.add_module(f'route_{module_m}', EmptyLayer())
+
+        elif module_def["type"] == "shortcut":
+            filters = out_filters[1:][int(module_def['from'])]
+            modules.add_module(f'shortcut_{module_m}', EmptyLayer())
+
+        elif module_def['type'] == 'yolo':
+            anchor_idxs = [int(m) for m in module_def['mask'].split(',')]
+            anchors = [int(a) for a in module_def['anchors'].split(',')]
+            anchors = [(anchors[a], anchors[a + 1]) for a in range(0, len(anchors), 2)]
+            anchors = [anchors[i] for i in anchor_idxs]
+            num_classes = int(module_def['classes'])
+            img_size = int(hyperparams['height'])
+            detect_layer = YOLOLayer(anchors, num_classes, img_size)
+            modules.add_module(f'yolo_{module_m}', detect_layer)
+        module_list.append(modules)
+        out_filters.append(filters)
+
+    return hyperparams, module_list
