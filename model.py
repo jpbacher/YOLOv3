@@ -86,7 +86,7 @@ class YoloLayer(nn.module):
         self.mse_loss = nn.MSELoss()
         self.bce_loss = nn.BCELoss()
         self.obj_scale = 1
-        self.noobj_scale = 100
+        self.no_obj_scale = 100
         self.metrics = {}
 
     def compute_grid_offsets(self, grid_size):
@@ -99,7 +99,7 @@ class YoloLayer(nn.module):
         self.anchor_w = self.scaled_anchors[:, 0:1].view((1, self.anchor_count, 1, 1))
         self.anchor_h = self.scaled_anchors[:, 1:2].view((1, self.anchor_count, 1, 1))
 
-    def forward(self, x, y=None, img_dim=None):
+    def forward(self, x, tgt=None, img_dim=None):
         self.img_dim = img_dim
         samples = x.size(0)
         grid_size = x.size(2)
@@ -116,3 +116,19 @@ class YoloLayer(nn.module):
         pred_class = torch.sigmoid(prediction[...., 5])
         if grid_size != self.grid_size:
             self.compute_grid_offsets(grid_size)
+        pred_boxes = torch.FloatTensor(prediction[..., :4].shape)
+        pred_boxes[..., 0] = x.data + self.grid_x
+        pred_boxes[..., 1] = y.data + self.grid_y
+        pred_boxes[..., 2] = torch.exp(w.data) * self.anchor_w
+        pred_boxes[..., 3] = torch.exp(h.data) * self.anchor_h
+        out = torch.cat(
+            (
+                pred_boxes.view(samples, -1, 4) * self.stride,
+                pred_conf.view(samples, -1, 1),
+                pred_class.view(samples, -1, self.num_classes),
+            ),
+            -1,
+        )
+        if tgt is None:
+            return out, 0
+        else:
